@@ -1,0 +1,13 @@
+{
+  "name": "browservault",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "SESSION", "class_name": "Session" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Session"] }]
+}

@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrowserVault Live</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #EDF1F4; --surface: #FFFFFF; --surface-2: #F6F8FA;
+    --ink: #17212B; --muted: #5B6B7A; --line: #D9E0E6; --line-strong: #C3CDD6;
+    --accent: #0B7285; --accent-ink: #085A6A; --accent-soft: #DDEEF2;
+    --ok: #177245; --ok-soft: #DDF0E4;
+    --warn: #9A5B00; --warn-soft: #FBEED6; --warn-line: #E4C68A;
+    --bad: #B42318; --bad-soft: #FBE4E1;
+    --shadow: 0 1px 2px rgba(23,33,43,.06), 0 8px 24px rgba(23,33,43,.07);
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --display: "Archivo", "Instrument Sans", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.45; padding-inline: 16px; }
+  .app { max-width: 1360px; margin: 0 auto; padding-block: 14px 24px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .topbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; }
+  .wordmark { display: flex; align-items: center; gap: 10px; }
+  .wordmark .name { font-family: var(--display); font-weight: 700; font-size: 19px; letter-spacing: -.01em; }
+  .wordmark .name span { color: var(--accent); }
+  .wordmark .sub { font-size: 11px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  .controls { margin-left: auto; display: flex; gap: 8px; }
+  .btn { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 8px; padding: 7px 14px; font-weight: 600; }
+  .btn.approve { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .btn.deny { background: transparent; border-color: var(--bad); color: var(--bad); }
+
+  .split { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(320px,1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+  .browser { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+  .chrome { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  .dots { display: flex; gap: 5px; } .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--line-strong); }
+  .urlbar { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .urlbar .lock { color: var(--ok); flex-shrink: 0; }
+  .urlbar .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .live { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--muted); }
+  .live .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+  .live.on { color: var(--bad); } .live.on .pulse { background: var(--bad); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% {opacity:1} 50% {opacity:.3} }
+  @media (prefers-reduced-motion: reduce) { .live.on .pulse { animation: none; } }
+  .screen { background: #fff; color: #222; height: 470px; overflow-y: auto; overflow-x: hidden; }
+  .stepstrip { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--line); background: var(--surface-2); font-size: 12px; color: var(--muted); }
+  .stepstrip .label { font-weight: 500; color: var(--ink); }
+
+  .panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 14px 16px; }
+  .card h2 { margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+  .objective { font-family: var(--display); font-weight: 600; font-size: 15px; line-height: 1.4; text-wrap: balance; }
+  .meta-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+  .pill.bad { background: var(--bad-soft); border-color: transparent; color: var(--bad); }
+  .pill.accent { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); }
+
+  .left-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .qr-row { display: flex; gap: 14px; align-items: center; margin-top: 12px; }
+  .qr-box { background: #fff; padding: 8px; border: 1px solid var(--line); border-radius: 8px; flex-shrink: 0; line-height: 0; }
+  .qr-box img, .qr-box canvas { display: block; }
+  .qr-caption { font-size: 12.5px; color: var(--muted); }
+  .qr-caption b { color: var(--ink); }
+
+  .mcp-url { display: flex; gap: 8px; align-items: center; }
+  .mcp-url code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; overflow-wrap: anywhere; }
+  .hint { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+  .hint b { color: var(--ink); }
+
+  .approval { border: 1px solid var(--warn-line); background: var(--warn-soft); }
+  .approval h2 { color: var(--warn); }
+  .approval .perm { font-family: var(--display); font-weight: 600; font-size: 15px; margin-bottom: 10px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13px; margin: 0; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+  .approval .note { font-size: 12px; color: var(--muted); margin: 10px 0 12px; }
+  .approval .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .conn { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .conn:last-child { border-bottom: 0; }
+  .conn .who { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .conn .net { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .conn .ua { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+
+  .cart-list .row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .cart-list .row:last-child { border-bottom: 0; }
+  .empty { color: var(--muted); font-size: 12.5px; font-style: italic; }
+
+  .log { display: flex; flex-direction: column; max-height: 380px; overflow-y: auto; }
+  .log-entry { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); text-align: left; background: none; border-left: 0; border-right: 0; border-top: 0; width: 100%; }
+  .log-entry:last-child { border-bottom: 0; }
+  .log-entry .thumb { width: 74px; height: 48px; border-radius: 5px; border: 1px solid var(--line); overflow: hidden; background: #fff; flex-shrink: 0; }
+  .log-entry .thumb-inner { width: 700px; transform: scale(.1057); transform-origin: 0 0; background: #fff; color: #222; pointer-events: none; }
+  .log-entry .what { font-weight: 500; font-size: 13px; }
+  .log-entry .meta { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+  .badge { font-size: 11px; font-weight: 600; border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.bad { background: var(--bad-soft); color: var(--bad); }
+  .badge.accent { background: var(--accent-soft); color: var(--accent-ink); }
+
+  .overlay { position: fixed; inset: 0; background: rgba(10,16,22,.55); z-index: 40; display: grid; place-items: center; padding: 24px 16px; }
+  .overlay .frame { background: var(--surface); border-radius: 12px; box-shadow: var(--shadow); width: min(760px,100%); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+  .overlay .frame-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .overlay .frame-head .t { font-weight: 600; font-size: 13px; flex: 1; min-width: 0; }
+  .overlay .frame-head .u { font-family: var(--mono); font-size: 11.5px; color: var(--muted); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .overlay .shot { overflow: auto; background: #fff; }
+  .overlay .shot-inner { width: 700px; max-width: 100%; background: #fff; color: #222; margin: 0 auto; }
+  .overlay .close { border: 1px solid var(--line); background: var(--surface-2); border-radius: 7px; padding: 4px 10px; font-weight: 600; }
+
+  /* Mock Cartwheel pages (light, fixed — these are page screenshots) */
+  .s-head { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid #E6E6E6; background: #fff; position: sticky; top: 0; }
+  .s-logo { font-family: var(--display); font-weight: 700; font-size: 16px; color: #D9542B; }
+  .s-nav { display: flex; gap: 14px; color: #666; font-size: 12.5px; }
+  .s-user { margin-left: auto; color: #666; font-size: 12px; white-space: nowrap; }
+  .s-body { padding: 20px 22px 28px; font-size: 13px; }
+  .s-card { border: 1px solid #E3E3E3; border-radius: 8px; padding: 14px 16px; background: #fff; margin-bottom: 12px; }
+  .s-card.hl { border: 2px solid #D9542B; }
+  .s-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .s-grow { flex: 1; min-width: 140px; }
+  .s-title { font-weight: 600; font-size: 14px; }
+  .s-sub { color: #777; font-size: 12px; }
+  .s-price { font-family: var(--display); font-weight: 700; font-size: 18px; white-space: nowrap; }
+  .s-btn { border-radius: 6px; padding: 7px 14px; color: #fff; font-weight: 600; font-size: 12.5px; display: inline-block; background: #D9542B; white-space: nowrap; }
+  .s-stars { color: #E8A33D; letter-spacing: 1px; }
+  .s-total { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  .s-total.grand { font-weight: 700; font-size: 15px; border-top: 1px solid #E3E3E3; margin-top: 6px; padding-top: 10px; }
+  .s-check { text-align: center; padding: 34px 20px; }
+  .s-check .mark { width: 52px; height: 52px; border-radius: 50%; background: #DDF0E4; color: #177245; display: grid; place-items: center; margin: 0 auto 12px; font-size: 24px; }
+  .s-input { border: 1px solid #CFCFCF; border-radius: 6px; padding: 7px 10px; background: #F2F2FE; border-color: #7A7AE8; font-family: var(--mono); font-size: 12.5px; color: #333; }
+
+  footer.app-foot { margin-top: 18px; text-align: center; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="wordmark">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+        <rect x="2" y="2" width="26" height="26" rx="7" fill="none" stroke="var(--accent)" stroke-width="2.4"/>
+        <circle cx="15" cy="15" r="6" fill="none" stroke="var(--accent)" stroke-width="2.4"/>
+        <line x1="15" y1="15" x2="15" y2="10.5" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <div class="name">Browser<span>Vault</span> Live</div>
+        <div class="sub">Real agents · simulated store</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn" id="btn-reset">Reset session</button>
+    </div>
+  </div>
+
+  <div class="split">
+    <div class="left-col">
+    <section class="browser" aria-label="Agent browser session">
+      <div class="chrome">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="urlbar">
+          <svg class="lock" width="11" height="13" viewBox="0 0 11 13" aria-hidden="true"><rect x="1" y="5.5" width="9" height="6.5" rx="1.5" fill="currentColor"/><path d="M3 5.5V4a2.5 2.5 0 0 1 5 0v1.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span class="url" id="url">https://cartwheel.example/</span>
+        </div>
+        <div class="live" id="live"><span class="pulse"></span>LIVE</div>
+      </div>
+      <div class="screen" id="screen"></div>
+      <div class="stepstrip"><span class="label" id="steplabel">Waiting for an agent to connect…</span></div>
+    </section>
+
+    <section class="card">
+      <h2>Connections detected</h2>
+      <div id="connections"><div class="empty">No connection attempts yet. This card lights up the moment any MCP client touches the endpoint.</div></div>
+    </section>
+    </div>
+
+    <div class="panel">
+      <section class="card approval" id="approval-card" hidden>
+        <h2>Approval required — agent is blocked</h2>
+        <div class="perm" id="approval-title"></div>
+        <dl class="kv" id="approval-kv"></dl>
+        <p class="note">The card number is held by the vault, masked. Approval covers this single charge only — the agent stays blocked until you decide.</p>
+        <div class="actions">
+          <button class="btn approve" id="btn-approve">Approve once</button>
+          <button class="btn deny" id="btn-deny">Deny purchase</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Mission</h2>
+        <div class="objective">Supervise an external AI agent across three simulated workflows — shopping (Cartwheel), travel booking (SkyTrip), and software renewal (FluxTools). It can browse freely — but it cannot spend without you.</div>
+        <div class="meta-row">
+          <span class="pill" id="status-pill">Waiting for agent</span>
+          <span class="pill" id="agent-pill" hidden></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Connect your agent (MCP)</h2>
+        <div class="mcp-url">
+          <code id="mcp-url"></code>
+          <button class="btn" id="btn-copy">Copy</button>
+        </div>
+        <div class="qr-row">
+          <div class="qr-box" id="qr" aria-label="QR code with the MCP endpoint URL"></div>
+          <div class="qr-caption">📱 <b>Connect from your phone:</b> scan to get the MCP URL, then paste it as a connector / remote MCP server in the Grok app. The bot lands in the same store — this console shows it live.</div>
+        </div>
+        <div class="hint">
+          Add this URL as a remote MCP server / connector in Grok, Claude, or any MCP client, then try one of:
+          <br>🛒 <b>“Buy me a HEPA filter for my Airmax 300 from the Cartwheel store.”</b>
+          <br>✈️ <b>“Book the cheapest nonstop SFO → AUS flight for Oct 12–15.”</b>
+          <br>🔑 <b>“Renew the Flux Design Suite license — use a promo if you find one.”</b>
+          <br>When the bot reaches the payment step, the approval request appears here.
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Cart</h2>
+        <div class="cart-list" id="cart"><div class="empty">Cart is empty.</div></div>
+      </section>
+
+      <section class="card">
+        <h2>Activity log</h2>
+        <div class="log" id="log"><div class="empty">No activity yet. Connect an agent to begin.</div></div>
+      </section>
+    </div>
+  </div>
+
+  <footer class="app-foot">Demo — Cartwheel is a simulated store. No real products, payments, or charges.</footer>
+</div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="frame" role="dialog" aria-modal="true" aria-label="Step snapshot">
+    <div class="frame-head">
+      <div class="t"><span id="ov-title"></span><span class="u" id="ov-url"></span></div>
+      <button class="close" id="ov-close">Close</button>
+    </div>
+    <div class="shot"><div class="shot-inner" id="ov-shot"></div></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+const CATALOG = {
+  hepa13: { name: "Airmax OEM HEPA-13 Filter (300 series)", price: 34.99, rating: 4.8, reviews: 2113, blurb: "Genuine replacement filter, fits Airmax 300/310." },
+  buds:   { name: "Pebble ANC Wireless Earbuds",            price: 79.99, rating: 4.6, reviews: 981,  blurb: "Active noise cancelling, 28h battery." },
+  kettle: { name: "Voltra Gooseneck Kettle 0.9L",           price: 49.00, rating: 4.7, reviews: 1540, blurb: "Variable temperature, pour-over ready." },
+  lamp:   { name: "Lumo Desk Lamp",                         price: 39.95, rating: 4.5, reviews: 622,  blurb: "Adjustable warm/cool light, USB-C powered." },
+  cable:  { name: "Corda USB-C 100W Cable 2m",              price: 12.99, rating: 4.4, reviews: 3307, blurb: "Braided, e-marked, 100W PD." },
+  mug:    { name: "Terraware Ceramic Mug 350ml",            price: 14.50, rating: 4.9, reviews: 458,  blurb: "Double-walled stoneware, matte glaze." },
+};
+const FLIGHTS = {
+  CL1184: { name: "Coastline Air 1184", depart: "Oct 12, 7:05a → 12:40p", ret: "Oct 15, 6:15p", fare: 312.00, taxes: 35.18 },
+  TP502:  { name: "TransPeak 502",      depart: "Oct 12, 9:40a → 3:05p",  ret: "Oct 15, 7:30p", fare: 358.00, taxes: 39.90 },
+  JW88:   { name: "Jetway 88",          depart: "Oct 12, 1:20p → 6:45p",  ret: "Oct 15, 8:10p", fare: 371.00, taxes: 41.20 },
+};
+const SKY = "#1A63D6", FLUX = "#6D4AE0", CARTC = "#D9542B";
+
+const money = (n) => "$" + n.toFixed(2);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const stars = (r) => "★".repeat(Math.round(r)) + "☆".repeat(5 - Math.round(r));
+
+function brandShell(brand, color, nav, user, body) {
+  return `<div class="s-head"><div class="s-logo" style="color:${color}">${brand}</div>
+    <div class="s-nav">${nav.map((n) => `<span>${n}</span>`).join("")}</div>
+    <div class="s-user">${esc(user)}</div></div><div class="s-body">${body}</div>`;
+}
+function shell(user, body) { return brandShell("Cartwheel", CARTC, ["Home", "Deals", "Orders"], user, body); }
+function skyShell(user, body) { return brandShell("SkyTrip", SKY, ["Flights", "Hotels", "Deals"], user, body); }
+function fluxShell(user, body) { return brandShell("FluxTools", FLUX, ["Dashboard", "Licenses", "Billing"], user, body); }
+const heldBanner = () => `<div class="s-sub" style="margin-top:10px;color:#9A5B00;font-weight:600">⏸ Held by BrowserVault — waiting for supervisor approval</div>`;
+function productCard(id, hl) {
+  const p = CATALOG[id]; if (!p) return "";
+  return `<div class="s-card ${hl ? "hl" : ""}"><div class="s-row">
+    <div class="s-grow"><div class="s-title">${esc(p.name)}</div>
+    <div class="s-sub"><span class="s-stars">${stars(p.rating)}</span> ${p.rating} · ${p.reviews.toLocaleString()} reviews</div></div>
+    <div class="s-price">${money(p.price)}</div><span class="s-btn">View</span></div></div>`;
+}
+function cartRows(cart) {
+  return cart.map((l) => `<div class="s-total"><span>${l.qty} × ${esc(l.name)}</span><span>${money(l.price * l.qty)}</span></div>`).join("");
+}
+function pageHTML(page, state) {
+  const user = state.agent ? "agent: " + state.agent.name : "Not signed in";
+  const cart = state.cart || [];
+  switch (page && page.view) {
+    case "results": {
+      const items = page.items || [];
+      return shell(user, `<div class="s-sub" style="margin-bottom:10px">Results for &ldquo;${esc(page.query)}&rdquo; · ${items.length} item(s)</div>` +
+        (items.length ? items.map((id, i) => productCard(id, i === 0)).join("") : `<div class="s-card">No results.</div>`));
+    }
+    case "product": {
+      const p = CATALOG[page.id]; if (!p) return shell(user, `<div class="s-card">Product not found.</div>`);
+      return shell(user, `<div class="s-card"><div class="s-row">
+        <div class="s-grow"><div class="s-title" style="font-size:15px">${esc(p.name)}</div>
+        <div class="s-sub" style="margin:4px 0"><span class="s-stars">${stars(p.rating)}</span> ${p.rating} (${p.reviews.toLocaleString()}) · In stock</div>
+        <div class="s-sub">${esc(p.blurb)}</div>
+        <div class="s-sub" style="margin-top:6px">Delivery: 2–3 business days · free over $35</div></div>
+        <div><div class="s-price" style="margin-bottom:8px">${money(p.price)}</div><span class="s-btn">Add to cart</span></div>
+      </div></div>`);
+    }
+    case "cart":
+      return shell(user, `<div class="s-card"><div class="s-title" style="margin-bottom:10px">Cart (${cart.reduce((s,l)=>s+l.qty,0)} item(s))</div>` +
+        (cart.length ? cartRows(cart) : `<div class="s-sub">Cart is empty.</div>`) + `<div style="margin-top:10px"><span class="s-btn">Checkout</span></div></div>`);
+    case "checkout": {
+      const a = state.approval;
+      return shell(user, `<div class="s-card"><div class="s-title" style="margin-bottom:10px">Checkout</div>
+        ${cartRows(cart)}
+        <div class="s-total grand"><span>Order total</span><span>${a ? money(a.amount) : ""}</span></div>
+        <div style="margin:10px 0 6px"><span class="s-sub">Payment</span></div>
+        <div class="s-input" style="width:70%">Visa •••• •••• •••• 4821</div>
+        <div class="s-sub" style="margin-top:10px;color:#9A5B00;font-weight:600">⏸ Held by BrowserVault — waiting for supervisor approval</div>
+      </div>`);
+    }
+    case "confirmation": {
+      const o = state.lastOrder || {};
+      return shell(user, `<div class="s-check"><div class="mark">✓</div>
+        <div class="s-title" style="font-size:17px">Order placed</div>
+        <div class="s-sub" style="margin:6px 0 12px">Order ${esc(o.number || "")} · ${money(o.amount || 0)} · Visa •••• 4821</div>
+        <div style="font-family:var(--mono);font-size:14px;color:#D9542B">${esc(o.eta || "")}</div>
+        <div class="s-sub" style="margin-top:10px">${(o.items || []).map(esc).join("<br>")}</div></div>`);
+    }
+    /* ---------- SkyTrip (travel) ---------- */
+    case "sky-results": {
+      const ids = Object.keys(FLIGHTS);
+      return skyShell(user, `<div class="s-sub" style="margin-bottom:10px">${esc(page.from || "SFO")} → ${esc(page.to || "AUS")} · Oct 12–15 · Nonstop only · ${ids.length} results</div>` +
+        ids.map((id, i) => { const f = FLIGHTS[id];
+          return `<div class="s-card" ${i === 0 ? `style="border:2px solid ${SKY}"` : ""}><div class="s-row">
+            <div class="s-grow"><div class="s-title">${f.name}</div><div class="s-sub">${f.depart} nonstop · returns ${f.ret}</div></div>
+            <div class="s-price">${money(f.fare)}</div><span class="s-btn" style="background:${SKY}">Select</span></div></div>`; }).join(""));
+    }
+    case "sky-fare": {
+      const f = FLIGHTS[page.id]; if (!f) return skyShell(user, `<div class="s-card">Fare not found.</div>`);
+      return skyShell(user, `<div class="s-card"><div class="s-title">${f.name} — ${money(f.fare)} round trip</div>
+        <div class="s-sub" style="margin:6px 0 12px">${f.depart} · returns ${f.ret}</div>
+        <div class="s-total"><span>Carry-on bag</span><span style="color:#177245;font-weight:600">Included</span></div>
+        <div class="s-total"><span>Checked bag</span><span>$35 each way</span></div>
+        <div class="s-total"><span>Changes</span><span>Free within 24h</span></div>
+        <div class="s-total grand"><span>Total with taxes</span><span>${money(f.fare + f.taxes)}</span></div>
+        <div style="margin-top:12px"><span class="s-btn" style="background:${SKY}">Continue to booking</span></div></div>`);
+    }
+    case "sky-checkout": {
+      const f = FLIGHTS[page.id] || {}; const a = state.approval;
+      return skyShell(user, `<div class="s-card"><div class="s-title" style="margin-bottom:10px">Payment — ${esc(f.name || "flight")}</div>
+        <div class="s-input" style="width:70%">•••• •••• •••• 4821</div>
+        <div class="s-total" style="margin-top:10px"><span>Fare (round trip)</span><span>${money(f.fare || 0)}</span></div>
+        <div class="s-total"><span>Taxes &amp; fees</span><span>${money(f.taxes || 0)}</span></div>
+        <div class="s-total grand"><span>Total</span><span>${a ? money(a.amount) : ""}</span></div>${heldBanner()}</div>`);
+    }
+    case "sky-confirmation": {
+      const b = state.lastBooking || {};
+      return skyShell(user, `<div class="s-check"><div class="mark">✓</div>
+        <div class="s-title" style="font-size:17px">You're booked!</div>
+        <div class="s-sub" style="margin:6px 0 12px">Confirmation code</div>
+        <div style="font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:.1em;color:${SKY}">${esc(b.code || "")}</div>
+        <div class="s-sub" style="margin-top:14px">${esc(b.flight || "")} · ${esc(b.itinerary || "")} · ${money(b.amount || 0)}</div></div>`);
+    }
+
+    /* ---------- FluxTools (renewal) ---------- */
+    case "flux-licenses":
+      return fluxShell(user, `<div class="s-card" style="border:2px solid #E4C68A;background:#FFFBF2"><div class="s-row">
+        <div class="s-grow"><div class="s-title">Flux Design Suite — Team</div>
+        <div class="s-sub">12 seats · 11 active · expires Sep 30, 2026 · renews at $99/seat/yr</div></div>
+        <div class="s-price">$1,188<span style="font-size:12px;color:#777">/yr</span></div>
+        <span class="s-btn" style="background:${FLUX}">Renew now</span></div></div>
+        <div class="s-card"><div class="s-row"><div class="s-grow"><div class="s-title">Flux Assets CDN</div>
+        <div class="s-sub">Active until Mar 2027</div></div></div></div>`);
+    case "flux-promos":
+      return fluxShell(user, `<div class="s-title" style="margin-bottom:10px">Current promotions</div>
+        <div class="s-card" style="border:2px solid ${FLUX}"><div class="s-row">
+        <div class="s-grow"><div class="s-title">RENEW15</div><div class="s-sub">15% off annual team renewals · valid through Oct 31</div></div>
+        <span class="s-btn" style="background:${FLUX}">Copy code</span></div></div>
+        <div class="s-card"><div class="s-row"><div class="s-grow"><div class="s-title">EDU40</div>
+        <div class="s-sub">Education plans only — not applicable</div></div></div></div>`);
+    case "flux-checkout": {
+      const a = state.approval;
+      return fluxShell(user, `<div class="s-card"><div class="s-title" style="margin-bottom:10px">Renewal — Flux Design Suite Team</div>
+        <div class="s-total"><span>12 seats × $99.00</span><span>$1,188.00</span></div>
+        ${page.promo ? `<div class="s-total" style="color:#177245"><span>Promo RENEW15 (−15%)</span><span>−$178.20</span></div>` : ""}
+        <div class="s-total grand"><span>Total due today</span><span>${a ? money(a.amount) : money(page.total || 0)}</span></div>
+        <div style="margin:10px 0 6px"><span class="s-sub">Payment</span></div>
+        <div class="s-input" style="width:70%">•••• •••••• •3007</div>${heldBanner()}</div>`);
+    }
+    case "flux-receipt": {
+      const r = state.lastRenewal || {};
+      return fluxShell(user, `<div class="s-check"><div class="mark">✓</div>
+        <div class="s-title" style="font-size:17px">Renewal complete</div>
+        <div class="s-sub" style="margin:6px 0 12px">Invoice ${esc(r.invoice || "")} · ${money(r.amount || 0)} · Corporate Amex •3007</div>
+        <div style="font-family:var(--mono);font-size:14px;color:${FLUX}">${esc(r.product || "")} · ${r.seats || ""} seats · valid through ${esc(r.newExpiry || "")}</div></div>`);
+    }
+
+    default:
+      return shell(user, `<div style="text-align:center;padding:40px 20px;color:#999">
+        <div style="font-family:var(--display);font-weight:600;font-size:16px;color:#666">Simulated sites — Cartwheel · SkyTrip · FluxTools</div>
+        <div style="font-size:12.5px;margin-top:4px">An agent connected over MCP will browse here.<br>Nothing real is sold, booked, or charged.</div></div>`);
+  }
+}
+
+let lastJSON = "";
+let stateCache = null;
+
+function render(state) {
+  stateCache = state;
+  $("screen").innerHTML = pageHTML(state.page, state);
+  $("url").textContent = (state.page && state.page.url) || "https://cartwheel.example/";
+
+  const map = {
+    waiting: ["Waiting for agent", ""],
+    browsing: ["Agent browsing", "accent"],
+    awaiting: ["Paused — awaiting your approval", "warn"],
+    approved: ["Approved — agent completing order", "ok"],
+    denied: ["Purchase denied", "bad"],
+    done: ["Order complete", "ok"],
+  };
+  const [label, cls] = map[state.status] || ["Idle", ""];
+  const pill = $("status-pill");
+  pill.textContent = label;
+  pill.className = "pill" + (cls ? " " + cls : "");
+  $("live").classList.toggle("on", ["browsing", "awaiting", "approved"].includes(state.status));
+
+  const ap = $("agent-pill");
+  if (state.agent) { ap.hidden = false; ap.textContent = "agent: " + state.agent.name + (state.agent.version ? " " + state.agent.version : ""); }
+  else ap.hidden = true;
+
+  $("steplabel").textContent =
+    state.status === "waiting" ? "Waiting for an agent to connect…" :
+    state.status === "awaiting" ? "Agent blocked at checkout — your decision needed" :
+    state.status === "denied" ? "Purchase denied — agent cannot charge the card" :
+    state.status === "done" ? "Transaction complete" : "Agent active on a simulated site";
+
+  // approval card
+  const card = $("approval-card");
+  const a = state.approval;
+  if (a && a.status === "pending") {
+    card.hidden = false;
+    $("approval-title").textContent = a.title;
+    $("approval-kv").innerHTML = a.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  } else card.hidden = true;
+
+  // connections
+  const connEl = $("connections");
+  if (state.connections && state.connections.length) {
+    connEl.innerHTML = state.connections.map((c) => `
+      <div class="conn">
+        <div class="who">${esc(c.name)}${c.version ? " " + esc(c.version) : ""}
+          <span class="badge accent">MCP client</span>
+          <span style="font-weight:400;font-size:11.5px;color:var(--muted)">${new Date(c.t).toLocaleTimeString()}</span>
+        </div>
+        <div class="net">${esc([c.org, c.loc, c.ip].filter(Boolean).join(" · ") || "network info unavailable")}</div>
+        <div class="ua">UA: ${esc(c.ua || "unknown")}</div>
+      </div>`).join("");
+  } else {
+    connEl.innerHTML = '<div class="empty">No connection attempts yet. This card lights up the moment any MCP client touches the endpoint.</div>';
+  }
+
+  // cart
+  const cartEl = $("cart");
+  if (state.cart && state.cart.length) {
+    cartEl.innerHTML = state.cart.map((l) =>
+      `<div class="row"><span>${l.qty} × ${esc(l.name)}</span><span style="font-weight:600">${money(l.price * l.qty)}</span></div>`).join("");
+  } else cartEl.innerHTML = '<div class="empty">Cart is empty.</div>';
+
+  // log
+  const logEl = $("log");
+  if (state.log && state.log.length) {
+    const nearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60;
+    logEl.innerHTML = state.log.map((e, i) => `
+      <button class="log-entry" data-i="${i}" title="View snapshot">
+        <span class="thumb"><span class="thumb-inner">${pageHTML(e.page, state)}</span></span>
+        <span><span class="what">${esc(e.action)}</span><br>
+        <span class="meta">${new Date(e.t).toLocaleTimeString()} · ${esc(e.actor)}</span></span>
+        <span class="badge ${e.badge}">${esc(e.outcome)}</span>
+      </button>`).join("");
+    if (nearBottom) logEl.scrollTop = logEl.scrollHeight;
+  } else logEl.innerHTML = '<div class="empty">No activity yet. Connect an agent to begin.</div>';
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/state");
+    const text = await r.text();
+    if (text !== lastJSON) { lastJSON = text; render(JSON.parse(text)); }
+  } catch (e) { /* transient network error — keep polling */ }
+}
+setInterval(poll, 1500);
+poll();
+
+async function post(path) {
+  const r = await fetch(path, { method: "POST" });
+  const text = await r.text();
+  lastJSON = text; render(JSON.parse(text));
+}
+$("btn-approve").addEventListener("click", () => post("/api/approve"));
+$("btn-deny").addEventListener("click", () => post("/api/deny"));
+$("btn-reset").addEventListener("click", () => post("/api/reset"));
+
+$("mcp-url").textContent = location.origin + "/mcp";
+try {
+  new QRCode($("qr"), { text: location.origin + "/mcp", width: 112, height: 112, correctLevel: QRCode.CorrectLevel.M });
+} catch (e) { $("qr").parentElement.hidden = true; }
+$("btn-copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(location.origin + "/mcp"); $("btn-copy").textContent = "Copied!"; }
+  catch (e) { $("btn-copy").textContent = "Select & copy"; }
+  setTimeout(() => { $("btn-copy").textContent = "Copy"; }, 1500);
+});
+
+$("log").addEventListener("click", (ev) => {
+  const t = ev.target.closest(".log-entry");
+  if (!t || !stateCache) return;
+  const e = stateCache.log[Number(t.dataset.i)];
+  if (!e) return;
+  $("ov-title").textContent = e.action + " — " + e.outcome;
+  $("ov-url").textContent = (e.page && e.page.url) || "";
+  $("ov-shot").innerHTML = pageHTML(e.page, stateCache);
+  $("overlay").hidden = false;
+  $("ov-close").focus();
+});
+$("ov-close").addEventListener("click", () => { $("overlay").hidden = true; });
+$("overlay").addEventListener("click", (ev) => { if (ev.target === $("overlay")) $("overlay").hidden = true; });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("overlay").hidden = true; });
+</script>
+</body>
+</html>
