@@ -469,6 +469,25 @@ const ascii = (s) => String(s || "").replace(/[^\x20-\x7E]/g, "?").slice(0, 300)
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+
+    // Voice presenter: mint a short-lived xAI realtime token server-side.
+    // The XAI_API_KEY secret lives in Cloudflare and never reaches the browser.
+    if (url.pathname === "/api/voice/session" && req.method === "POST") {
+      const key = (env.XAI_API_KEY || "").trim();
+      if (!key) return new Response(JSON.stringify({ error: "no XAI_API_KEY secret set on the Worker" }), { status: 500, headers: JSON_HEADERS });
+      try {
+        const r = await fetch("https://api.x.ai/v1/realtime/client_secrets", {
+          method: "POST",
+          headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+          body: JSON.stringify({ expires_after: { seconds: 300 } }),
+        });
+        const body = await r.text();
+        return new Response(body, { status: r.status, headers: { ...JSON_HEADERS, "content-type": "application/json" } });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: "could not reach xAI: " + String(e) }), { status: 502, headers: JSON_HEADERS });
+      }
+    }
+
     if (url.pathname.startsWith("/api/") || url.pathname === "/mcp") {
       const name = url.searchParams.get("session") || "main";
       const id = env.SESSION.idFromName(name);

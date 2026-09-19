@@ -9,7 +9,7 @@ Built for the TrueFoundry Agent Harness Hackathon (Santa Clara, Sep 19, 2026) by
 
 ## What it does
 
-Any MCP-capable agent (tested with Grok, Cursor, and Claude) connects to the remote MCP server and gets tools for three simulated commerce workflows:
+Any MCP-capable agent (tested with Meta Muse, Grok, Cursor, and Claude) connects to the remote MCP server and gets tools for three simulated commerce workflows:
 
 | Workflow | Site | Tools |
 |---|---|---|
@@ -18,6 +18,22 @@ Any MCP-capable agent (tested with Grok, Cursor, and Claude) connects to the rem
 | 🔑 License renewal | FluxTools | `get_license_status` → `find_promo_code` → `renew_license` → `complete_renewal` |
 
 The agent browses freely — but **every payment tool call blocks server-side** on a pending approval that only a human can resolve in the supervision console. `list_catalog` shows everything purchasable across all three workflows.
+
+## Runs inside TrueForge (the agent harness)
+
+BrowserVault is a plain remote MCP server, so it drops straight into **[TrueForge](https://trueforge.dev)**, TrueFoundry's open-source agent harness:
+
+1. **Model** — add Grok (`grok-4.5`) as a custom OpenAI-compatible provider (`https://api.x.ai/v1`).
+2. **Connector** — Settings → Connectors → Add MCP Server: `https://browservault.mussdroid.workers.dev/mcp` (no auth). All 16 tools appear.
+3. **Agent** — build a `browservault-shopper` agent (Grok + BrowserVault tools) instructed to poll `check_approval` after a payment blocks.
+
+Then in TrueForge chat: *"Buy me a HEPA filter from the vault store."* TrueForge runs the loop and streams every tool call; at checkout the agent blocks, the **approval card** lights up in the BrowserVault console, a human clicks **Approve**, and the order completes. Verified end-to-end (order `CW-319820`).
+
+The division of labor: **TrueForge = the harness** (model routing, tool execution, the agent loop, sessions, its own approval capability); **BrowserVault = the MCP tool server + supervision layer** enforcing the human payment gate. Two independent approval layers, defense in depth.
+
+## Voice presenter (Grok realtime)
+
+The console ships a **🎙 Present** mode: a Grok realtime voice guide (xAI `wss://api.x.ai/v1/realtime`, voice `leo`) that gives a spoken tour and answers judge questions live. The `XAI_API_KEY` is a **Cloudflare Worker secret**; the Worker's `/api/voice/session` mints a 5-minute ephemeral token, so the key never reaches the browser. It's open-mic (server VAD — just talk, no push-to-talk) and routes audio through a media element so screen recorders capture it.
 
 ## Observe · Control · Test
 

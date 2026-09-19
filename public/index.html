@@ -139,6 +139,22 @@
   .s-input { border: 1px solid #CFCFCF; border-radius: 6px; padding: 7px 10px; background: #F2F2FE; border-color: #7A7AE8; font-family: var(--mono); font-size: 12.5px; color: #333; }
 
   footer.app-foot { margin-top: 18px; text-align: center; font-size: 12px; color: var(--muted); }
+
+  /* Voice presenter */
+  .btn.present { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .spot { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 12px; transition: outline-color .2s; }
+  #presentBar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: none;
+    background: var(--surface); border-top: 1px solid var(--line-strong);
+    box-shadow: 0 -6px 24px rgba(23,33,43,.12);
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); }
+  #presentBar .row { max-width: 1180px; margin: 0 auto; display: flex; gap: 12px; align-items: center; }
+  #pDot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  #presentBar.talking #pDot { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  #presentBar.qa #pDot { background: var(--ok); }
+  #pState { font-weight: 600; white-space: nowrap; font-size: 13px; }
+  #pCaption { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; min-width: 0; }
+  #presentBar kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-family: var(--mono); font-size: 11px; }
+  #presentBar button { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 7px; padding: 5px 12px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -156,6 +172,7 @@
       </div>
     </div>
     <div class="controls">
+      <button class="btn present" id="presentBtn">🎙 Present</button>
       <button class="btn" id="btn-reset">Reset session</button>
     </div>
   </div>
@@ -213,7 +230,7 @@
           <div class="qr-caption">📱 <b>Connect from your phone:</b> scan to get the MCP URL, then paste it as a connector / remote MCP server in the Grok app. The bot lands in the same store — this console shows it live.</div>
         </div>
         <div class="hint">
-          Add this URL as a remote MCP server / connector in Grok, Claude, or any MCP client, then try one of:
+          Add this URL as a remote MCP server / connector in Meta Muse, Grok, Claude, or any MCP client, then try one of:
           <br>🛒 <b>“Buy me a HEPA filter for my Airmax 300 from the Cartwheel store.”</b>
           <br>✈️ <b>“Book the cheapest nonstop SFO → AUS flight for Oct 12–15.”</b>
           <br>🔑 <b>“Renew the Flux Design Suite license — use a promo if you find one.”</b>
@@ -527,6 +544,225 @@ $("log").addEventListener("click", (ev) => {
 $("ov-close").addEventListener("click", () => { $("overlay").hidden = true; });
 $("overlay").addEventListener("click", (ev) => { if (ev.target === $("overlay")) $("overlay").hidden = true; });
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("overlay").hidden = true; });
+</script>
+
+<!-- ========================= Grok voice presenter ========================= -->
+<div id="presentBar">
+  <div class="row">
+    <span id="pDot"></span>
+    <strong id="pState">presenting</strong>
+    <span id="pCaption"></span>
+    <span style="white-space:nowrap">🎙 just speak to ask · <kbd>enter</kbd> resume · <kbd>space</kbd> skip</span>
+    <button id="pNext">skip ▸</button>
+    <button id="pEnd">end</button>
+  </div>
+  <!-- Grok's voice plays through this real media element so screen/tab recorders capture it -->
+  <audio id="pAudio" autoplay playsinline></audio>
+</div>
+
+<script>
+(function () {
+"use strict";
+const P_RATE = 24000;
+let pWs = null, pCtx = null, pMic = null, pMicNode = null, pSrcNode = null;
+let pCursor = 0, pSources = [], pMuted = true, pDest = null;
+let pSteps = [], pStep = 0, pAwaiting = false, pQAState = "off", pInQA = false, pGrace = null;
+const GRACE_MS = 2600;
+
+function pStatus(cls, state, cap) {
+  $("presentBar").className = cls || "";
+  $("pState").textContent = state;
+  if (cap !== undefined) $("pCaption").textContent = cap;
+}
+function pPlay(b64) {
+  const bin = atob(b64), n = bin.length / 2; if (!n) return;
+  const f32 = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let v = bin.charCodeAt(2*i) | (bin.charCodeAt(2*i+1) << 8); if (v >= 0x8000) v -= 0x10000; f32[i] = v / 32768; }
+  const buf = pCtx.createBuffer(1, n, P_RATE); buf.copyToChannel(f32, 0);
+  const s = pCtx.createBufferSource(); s.buffer = buf; s.connect(pDest || pCtx.destination);
+  pCursor = Math.max(pCursor, pCtx.currentTime + 0.05); s.start(pCursor); pCursor += n / P_RATE;
+  pSources.push(s); s.onended = () => { pSources = pSources.filter(x => x !== s); };
+}
+function pStopAudio() { pSources.forEach(s => { try { s.stop(); } catch (e) {} }); pSources = []; pCursor = 0; }
+async function pStartMic() {
+  pMic = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  pSrcNode = pCtx.createMediaStreamSource(pMic);
+  pMicNode = pCtx.createScriptProcessor(4096, 1, 1);
+  pSrcNode.connect(pMicNode); pMicNode.connect(pCtx.destination);
+  pMicNode.onaudioprocess = e => {
+    if (pMuted || !pWs || pWs.readyState !== 1) return;
+    const f32 = e.inputBuffer.getChannelData(0);
+    const i16 = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) i16[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32767)));
+    let bin = ""; const bytes = new Uint8Array(i16.buffer);
+    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    pWs.send(JSON.stringify({ type: "input_audio_buffer.append", audio: btoa(bin) }));
+  };
+}
+function spotlight(el) {
+  document.querySelectorAll(".spot").forEach(x => x.classList.remove("spot"));
+  if (el) { el.classList.add("spot"); el.scrollIntoView({ behavior: "smooth", block: "center" }); }
+}
+function cardOf(id) { const e = $(id); return e ? (e.closest(".card") || e) : null; }
+
+async function liveSummary() {
+  try {
+    const s = (typeof stateCache !== "undefined" && stateCache) ? stateCache : await (await fetch("/api/state")).json();
+    const p = [];
+    p.push("console status is " + (s.status || "waiting"));
+    if (s.agent) p.push("connected client is " + s.agent.name + (s.agent.version ? " " + s.agent.version : ""));
+    const c = s.connections && s.connections[0];
+    if (c && c.org) p.push("last connection from " + c.org + (c.loc ? " in " + c.loc : ""));
+    if (s.cart && s.cart.length) p.push("cart holds " + s.cart.reduce((a, l) => a + l.qty, 0) + " item(s)");
+    if (s.approval && s.approval.status === "pending") p.push("a payment is PENDING APPROVAL right now: " + s.approval.title);
+    if (s.lastOrder) p.push("last order " + s.lastOrder.number + " for $" + (s.lastOrder.amount || 0).toFixed(2));
+    return p.join("; ") + ".";
+  } catch (e) { return "live status unavailable right now."; }
+}
+
+function buildSteps() {
+  return [
+    { el: () => document.querySelector(".browser"),
+      text: "Greet the judges warmly: hi everyone, we're team Frontera, and this is BrowserVault. Then the problem, with energy: AI agents are getting wallets. Meta's agent strategy reportedly leans on visible browsers and tightly controlled payments, and enterprise AI is shifting from model wars toward context, permissions and control. Everyone agrees agents may browse, but spending needs supervision, and that layer barely exists. Once an agent holds a card, nothing structural stops it. BrowserVault is that missing layer: agents browse freely, but they cannot spend a cent without a human clicking approve." },
+    { el: () => cardOf("mcp-url"),
+      text: "Explain how it works, pointing at the connect panel and the connections list: BrowserVault is a remote MCP server running on Cloudflare Workers, so any agent can connect - we've tested Meta Muse, Grok, Cursor and Claude. The console detects every connection - the client's name, its network organization, and its geography - the moment it touches the endpoint. And the approval state lives in a Cloudflare Durable Object, so the block is enforced on the server, not in the agent's prompt where a clever model could talk its way past it." },
+    { el: () => ($("approval-card") && !$("approval-card").hidden) ? $("approval-card") : cardOf("status-pill"),
+      text: "Now the heart of it, control: credentials sit in a masked vault the agent never sees. When an agent reaches any payment - a checkout, a flight booking, a license renewal - it blocks, and this approval card shows the masked card number and the exact amount for a human to approve or deny. Every approval is single-use and type-checked, so an approval for one purchase can never be spent on another." },
+    { el: () => document.querySelector(".log") ? document.querySelector(".log").closest(".card") : document.querySelector(".browser"),
+      text: "Invite them to watch it live: an agent searches the store, adds an item to the cart, then stops - blocked at checkout, politely waiting. I approve, and the order completes on screen; if I denied instead, the agent is told to stand down and the charge is dead. Everything is observable - a full activity log with a snapshot of every step. Then close warmly: agents can browse, but humans hold the wallet. Thank the judges and invite their questions." },
+  ];
+}
+
+async function pInstructions(live) {
+  return `You are Agent Frontera, the live voice guide for BrowserVault, presenting for team Frontera to hackathon judges. Warm, quick, conversational - contractions, short sentences, talking TO the judges about what is on screen right now.
+
+BrowserVault is an agent supervision console for agentic commerce. Any MCP-capable agent (Meta Muse, Grok, Cursor, Claude) connects to a remote MCP server and can shop (a store called Cartwheel), book travel (SkyTrip), or renew software (FluxTools). It browses freely, but every payment tool call BLOCKS on the server on a pending approval that only a human can resolve in this console. Observe: a live browser view, an activity log with a snapshot of every step, and connection detection - client name, user agent, network organization and geo. Control: approvals are single-use, type-checked, and enforced in a Cloudflare Durable Object, not in the agent's prompt; credentials sit in a masked vault the agent never sees; a denial permanently blocks that charge. Tech: Cloudflare Workers and Durable Objects, a remote MCP server over streamable HTTP, and a plain JavaScript console. Honest caveats you volunteer if asked: the store and payments are simulated, so no real money moves; the client name is self-reported, so a bot could lie about it, but the network and geo come from the connection itself and are harder to fake - and either way the real security control is the human approval gate. Built for the TrueFoundry Agent Harness Hackathon, whose theme is observe, control, and test agents - exactly what this does.
+
+Live state on screen right now: ${live}
+
+Protocol: this is a short, timed demo. When a message starts with "PRESENT:", the text after it is your stage direction for the next beat - perform it in your own natural spoken words. Never read the direction aloud and never say the word PRESENT. Keep every fact exact. About 12 to 15 seconds per beat, energetic but human, no markdown, no filler words. When you hear a spoken question, it is a judge - answer in one to three tight, concrete, honest sentences, then stop; do not resume the tour on your own.`;
+}
+
+async function pNextStep() {
+  if (!pWs || pWs.readyState !== 1 || pQAState === "listening") return;
+  clearTimeout(pGrace);
+  pInQA = false; pQAState = "off"; pMuted = true;         // mic closed while Grok narrates
+  if (pStep >= pSteps.length) { pMuted = false; pStatus("qa", "tour done — just ask, or Enter to replay", ""); return; }
+  const st = pSteps[pStep++];
+  try { spotlight(st.el && st.el()); } catch (e) {}
+  const live = await liveSummary();
+  pAwaiting = true;
+  pWs.send(JSON.stringify({ type: "conversation.item.create", item: {
+    type: "message", role: "user",
+    content: [{ type: "input_text", text: "PRESENT: (current live state: " + live + ") " + st.text }] } }));
+  pWs.send(JSON.stringify({ type: "response.create" }));
+  pStatus("talking", `presenting ${pStep}/${pSteps.length}`, "");
+}
+
+async function startPresentation() {
+  $("presentBtn").disabled = true;
+  window.PRESENTING = true;
+  let tok;
+  try {
+    const j = await (await fetch("/api/voice/session", { method: "POST" })).json();
+    tok = j?.client_secret?.value || j?.value || j?.client_secret || j?.token;
+    if (!tok || typeof tok !== "string") throw new Error(j.error || "no token");
+  } catch (e) {
+    alert("voice session failed: " + e.message);
+    window.PRESENTING = false; $("presentBtn").disabled = false; return;
+  }
+  pCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: P_RATE });
+  // Route Grok's voice through a real <audio> element (via a MediaStream) so that
+  // screen recorders and the in-platform recorder reliably capture it, not just the speakers.
+  try {
+    pDest = pCtx.createMediaStreamDestination();
+    const aud = $("pAudio");
+    aud.srcObject = pDest.stream; aud.muted = false; aud.volume = 1;
+    aud.play().catch(() => { pDest = null; });   // fall back to speakers if blocked
+  } catch (e) { pDest = null; }
+  pSteps = buildSteps(); pStep = 0; pMuted = true; pQAState = "off"; pInQA = false;
+  $("presentBar").style.display = "block";
+  pStatus("", "connecting…", "");
+  const instr = await pInstructions(await liveSummary());
+  pWs = new WebSocket("wss://api.x.ai/v1/realtime?model=grok-voice-latest", ["xai-client-secret." + tok]);
+  pWs.onopen = async () => {
+    pWs.send(JSON.stringify({ type: "session.update", session: {
+      voice: "leo", instructions: instr,
+      turn_detection: { type: "server_vad", silence_duration_ms: 800 },   // open mic — just talk
+      audio: { input: { format: { type: "audio/pcm", rate: P_RATE } },
+               output: { format: { type: "audio/pcm", rate: P_RATE } } } } }));
+    pMuted = true;
+    try { await pStartMic(); } catch (e) { /* narration still works without a mic */ }
+    pNextStep();
+  };
+  pWs.onmessage = ev => {
+    if (typeof ev.data !== "string") return;
+    let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    const t = m.type || "";
+    if (t === "response.output_audio.delta" || t === "response.audio.delta") {
+      pMuted = true; clearTimeout(pGrace);       // Grok speaking -> mic closed (no self-trigger)
+      pPlay(m.delta || m.audio || "");
+    } else if (t.includes("output_audio_transcript") && t.endsWith(".delta")) {
+      $("pCaption").textContent = ($("pCaption").textContent + (m.delta || "")).slice(-260);
+    } else if (t === "input_audio_buffer.speech_started") {
+      clearTimeout(pGrace); pStopAudio();
+      pInQA = true; pQAState = "listening";
+      pStatus("qa", "🎙 listening…", "ask your question, then pause");
+    } else if (t === "input_audio_buffer.speech_stopped") {
+      pQAState = "answering"; pStatus("talking", "thinking…", "");
+    } else if (t === "response.done" || t === "response.completed") {
+      pAwaiting = false; pQAState = "off"; pMuted = false;   // open mic for a spoken question
+      if (pInQA) pStatus("qa", "answered — ask another, or Enter to resume tour", "");
+      else if (pStep < pSteps.length) {
+        pStatus("qa", `beat ${pStep}/${pSteps.length} — ask now, or it continues…`, "");
+        pGrace = setTimeout(() => { if (window.PRESENTING && !pInQA) pNextStep(); }, GRACE_MS);
+      } else pStatus("qa", "tour done — just ask, or Enter to replay", "");
+    } else if (t === "error") {
+      pStatus("", "error", (m.error && m.error.message) || "");
+    }
+  };
+  pWs.onclose = () => endPresentation(false);
+  pWs.onerror = () => pStatus("", "connection error", "");
+}
+
+function endPresentation(closeWs = true) {
+  window.PRESENTING = false;
+  clearTimeout(pGrace);
+  if (closeWs && pWs) { try { pWs.close(); } catch (e) {} }
+  if (pMicNode) { try { pMicNode.disconnect(); pSrcNode.disconnect(); } catch (e) {} }
+  if (pMic) pMic.getTracks().forEach(tr => tr.stop());
+  if (pCtx) { try { pCtx.close(); } catch (e) {} }
+  const aud = $("pAudio"); if (aud) { try { aud.pause(); aud.srcObject = null; } catch (e) {} }
+  pWs = pCtx = pMic = pMicNode = pSrcNode = pDest = null;
+  pStopAudio(); spotlight(null);
+  $("presentBar").style.display = "none";
+  $("presentBtn").disabled = false;
+}
+
+document.addEventListener("keydown", e => {
+  if (!window.PRESENTING) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (["input", "textarea", "select"].includes(tag)) return;
+  if (e.code !== "Enter" && e.code !== "Space") return;
+  e.preventDefault();
+  if (pQAState === "listening") return;          // let an in-progress question finish
+  pStopAudio();
+  if (pWs && pWs.readyState === 1 && pAwaiting) pWs.send(JSON.stringify({ type: "response.cancel" }));
+  clearTimeout(pGrace);
+  pAwaiting = false; pInQA = false; pQAState = "off"; pMuted = true;
+  if (pStep >= pSteps.length) pStep = 0;          // replay from the top when done
+  pStatus("talking", "resuming tour", "");
+  pNextStep();
+});
+$("presentBtn").addEventListener("click", startPresentation);
+$("pEnd").addEventListener("click", () => endPresentation(true));
+$("pNext").addEventListener("click", () => {
+  pStopAudio();
+  if (pWs && pWs.readyState === 1 && pAwaiting) pWs.send(JSON.stringify({ type: "response.cancel" }));
+  clearTimeout(pGrace);
+  pAwaiting = false; pInQA = false; pQAState = "off"; pMuted = true; pNextStep();
+});
+})();
 </script>
 </body>
 </html>
